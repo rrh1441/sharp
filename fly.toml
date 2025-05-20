@@ -1,0 +1,10 @@
+app = "sharp"
+primary_region = "sea"
+[build]
+  dockerfile = "Dockerfile"
+[env]
+  PYTHONUNBUFFERED = "1"
+[processes]
+  web     = "poetry run python -m web"
+  worker  = "poetry run python -m worker"
+  settler = "poetry run python -m settler"
