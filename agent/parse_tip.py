@@ -1,5 +1,21 @@
-# agent/parse_tip.py
-# ──────────────────────────────────────────────────────────────────────
+"""
+agent.parse_tip
+───────────────
+Convert one cleaned “bet line” into a structured TipPayload.
+
+Accepted formats
+────────────────
+• Money-line :  "Padres ML (2U)"      | "St Louis Cardinals ML"
+• Spread     :  "Knicks -4 (1U)"      | "NYR +1.5"
+• Total      :  "Padres / Jays UNDER 9 (1.5U)"
+
+Extras
+──────
+• Units may trail on the same line **or** be the next separate line.
+• O/U bets treat the first listed team as “team”, the second as opponent.
+• “min_odds: +120” (optional) is captured for ML bets.
+"""
+
 from __future__ import annotations
 
 import re
@@ -11,29 +27,30 @@ from agent.team_map import TEAM_CODE
 
 
 class UnmappedTeamError(ValueError):
-    """Raised when a nickname/city is not in TEAM_CODE."""
+    ...
 
 
 @dataclass(slots=True)
 class TipPayload:
-    units: int
-    team: str                     # 3-letter code we are betting on
+    units: float
+    team: str                     # 3-letter code we are backing
     opponent: Optional[str]       # 3-letter code or None
-    kickoff_iso: str              # ISO UTC timestamp (placeholder)
+    kickoff_iso: str              # placeholder timestamp
     market: Literal["ML", "SPREAD", "TOTAL"]
     line: float | None            # spread ±n.n or total n.n
     o_u: Literal["OVER", "UNDER", None]
-    min_odds: float | None
+    min_odds: float | None        # ML only
 
 
-# ── regexes ───────────────────────────────────────────────────────────
-RE_UNITS   = re.compile(r"\(?\s*(\d)\s*(?:U|UNITS?)\s*\)?", re.I)
-RE_SPREAD  = re.compile(r"([A-Z& ]+?)\s*([+-]\d+(?:\.\d+)?)")
-RE_ML      = re.compile(r"([A-Z& ]+?)\s*ML", re.I)
-RE_TOTAL   = re.compile(
-    r"([A-Z&]+)\s*/\s*([A-Z& ]+?)\s+(OVER|UNDER)\s+(\d+(?:\.\d+)?)", re.I
+# ── regex helpers ───────────────────────────────────────────────────
+_UNITS_RE  = re.compile(r"\(?\s*([\d.]+)\s*(?:U|UNITS?)\s*\)?", re.I)
+_SPREAD_RE = re.compile(r"^\s*([A-Z '.&-]+?)\s*([+-]\d+(?:\.\d+)?)", re.I)
+_ML_RE     = re.compile(r"^\s*([A-Z '.&-]+?)\s+ML\b", re.I)
+_TOTAL_RE  = re.compile(
+    r"^\s*([A-Z '.&-]+)\s*/\s*([A-Z '.&-]+)\s+(OVER|UNDER)\s+(\d+(?:\.\d+)?)",
+    re.I,
 )
-RE_MINODS  = re.compile(r"min[_\s-]?odds[:\s]*([\d.]+)", re.I)
+_MINOD_RE  = re.compile(r"min[_\s-]?odds[:\s]*([+-]?\d+(?:\.\d+)?)", re.I)
 
 
 def _code(raw: str) -> str:
@@ -43,39 +60,33 @@ def _code(raw: str) -> str:
     return TEAM_CODE[key]
 
 
-# ── main parser ───────────────────────────────────────────────────────
+# ── main parser ─────────────────────────────────────────────────────
 def parse_tip_email(text: str) -> TipPayload:
-    # units – mandatory
-    m_units = RE_UNITS.search(text)
-    if not m_units:
-        raise ValueError("Could not find units")
-    units = int(m_units.group(1))
+    # units (default 1 if absent)
+    m_units = _UNITS_RE.search(text)
+    units = float(m_units.group(1)) if m_units else 1.0
 
-    # 1) Totals   (Team / Team OVER|UNDER n.n)
-    m = RE_TOTAL.search(text)
-    if m:
-        raw_a, raw_b, o_u, total = m.groups()
+    # 1️⃣ Totals
+    if m := _TOTAL_RE.search(text):
+        raw_a, raw_b, over_under, total = m.groups()
         team_a, team_b = _code(raw_a), _code(raw_b)
-        pick = team_a                    # we tie bet to first team – fine for totals
         return TipPayload(
             units=units,
-            team=pick,
+            team=team_a,
             opponent=team_b,
             kickoff_iso=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             market="TOTAL",
             line=float(total),
-            o_u=o_u.upper(),
+            o_u=over_under.upper(),
             min_odds=None,
         )
 
-    # 2) Spreads
-    m = RE_SPREAD.search(text)
-    if m:
+    # 2️⃣ Spreads
+    if m := _SPREAD_RE.search(text):
         raw_team, line_str = m.groups()
-        sel = _code(raw_team)
         return TipPayload(
             units=units,
-            team=sel,
+            team=_code(raw_team),
             opponent=None,
             kickoff_iso=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             market="SPREAD",
@@ -84,19 +95,13 @@ def parse_tip_email(text: str) -> TipPayload:
             min_odds=None,
         )
 
-    # 3) Money-line
-    m = RE_ML.search(text)
-    if m:
+    # 3️⃣ Money-line
+    if m := _ML_RE.search(text):
         raw_team = m.group(1)
-        sel = _code(raw_team)
-        min_odds = (
-            float(RE_MINODS.search(text).group(1))  # type: ignore[arg-type]
-            if RE_MINODS.search(text)
-            else None
-        )
+        min_odds = float(_MINOD_RE.search(text).group(1)) if _MINOD_RE.search(text) else None
         return TipPayload(
             units=units,
-            team=sel,
+            team=_code(raw_team),
             opponent=None,
             kickoff_iso=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             market="ML",
@@ -105,4 +110,4 @@ def parse_tip_email(text: str) -> TipPayload:
             min_odds=min_odds,
         )
 
-    raise ValueError("No ML, spread, or total pattern found")
+    raise ValueError("unrecognised bet format")

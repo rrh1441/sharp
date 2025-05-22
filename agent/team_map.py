@@ -1,20 +1,20 @@
 """
-agent/team_map.py
-────────────────────────────────────────────────────────────────────────────
+agent.team_map
+──────────────
 Canonical team codes for every club likely to appear in NC Sharp emails.
 
-• NBA / MLB / NFL – official three-letter feed abbreviations
-• NHL             – three-letter club codes (the OddsAPI uses three as well)
+• NBA / MLB / NFL → official three-letter feed abbreviations
+• NHL            → three-letter club codes (OddsAPI’s convention)
 
-Both abbreviations *and* full-length names (plus common nick-names) map to
-the same code, so any reasonable phrasing parses cleanly.
+Both abbreviations *and* full-length city / nickname aliases map to the same
+code so any reasonable phrasing parses cleanly.
 """
 
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
-# master map  →  key = ANY alias (upper-cased, punctuation/spacing optional)
-# ---------------------------------------------------------------------------
+# ────────────────────────────────────────────────────────────────────
+# master map  →  key = ANY alias (uppercase, punctuation ignored)
+# ────────────────────────────────────────────────────────────────────
 TEAM_CODE: dict[str, str] = {
     # ────────── NBA ──────────
     "ATLANTA": "ATL", "HAWKS": "ATL",
@@ -29,14 +29,14 @@ TEAM_CODE: dict[str, str] = {
     "GOLDEN STATE": "GSW", "WARRIORS": "GSW", "GS": "GSW",
     "HOUSTON": "HOU", "ROCKETS": "HOU",
     "INDIANA": "IND", "PACERS": "IND",
-    "LAKERS": "LAL", "LOS ANGELES LAKERS": "LAL", "L.A. LAKERS": "LAL",
-    "CLIPPERS": "LAC", "LOS ANGELES CLIPPERS": "LAC", "L.A. CLIPPERS": "LAC",
+    "LOS ANGELES LAKERS": "LAL", "L.A. LAKERS": "LAL", "LAKERS": "LAL",
+    "LOS ANGELES CLIPPERS": "LAC", "L.A. CLIPPERS": "LAC", "CLIPPERS": "LAC",
     "MEMPHIS": "MEM", "GRIZZLIES": "MEM",
     "MIAMI": "MIA", "HEAT": "MIA",
     "MILWAUKEE": "MIL", "BUCKS": "MIL",
     "MINNESOTA": "MIN", "TIMBERWOLVES": "MIN", "T-WOLVES": "MIN",
     "NEW ORLEANS": "NOP", "PELICANS": "NOP", "NO": "NOP",
-    "NEW YORK": "NYK", "KNICKS": "NYK",
+    "NEW YORK": "NYK", "KNICKS": "NYK", "NEW YORK KNICKS": "NYK",
     "OKLAHOMA CITY": "OKC", "THUNDER": "OKC",
     "ORLANDO": "ORL", "MAGIC": "ORL",
     "PHILADELPHIA": "PHI", "SIXERS": "PHI", "76ERS": "PHI",
@@ -49,7 +49,7 @@ TEAM_CODE: dict[str, str] = {
     "WASHINGTON": "WAS", "WIZARDS": "WAS",
 
     # ────────── MLB ──────────
-    "ARIZONA": "ARI", "DIAMONDBACKS": "ARI", "D-BACKS": "ARI",
+    "ARIZONA": "ARI", "ARIZONA DIAMONDBACKS": "ARI", "DIAMONDBACKS": "ARI", "D-BACKS": "ARI",
     "ATLANTA": "ATL", "BRAVES": "ATL",
     "BALTIMORE": "BAL", "ORIOLES": "BAL", "O'S": "BAL",
     "BOSTON": "BOS", "RED SOX": "BOS",
@@ -58,7 +58,7 @@ TEAM_CODE: dict[str, str] = {
     "CINCINNATI": "CIN", "REDS": "CIN",
     "CLEVELAND": "CLE", "GUARDIANS": "CLE", "INDIANS": "CLE",
     "COLORADO": "COL", "ROCKIES": "COL",
-    "DETROIT": "DET", "TIGERS": "DET",
+    "DETROIT": "DET", "DETROIT TIGERS": "DET", "TIGERS": "DET",
     "HOUSTON": "HOU", "ASTROS": "HOU",
     "KANSAS CITY": "KC", "ROYALS": "KC",
     "LA ANGELS": "LAA", "ANGELS": "LAA",
@@ -74,7 +74,7 @@ TEAM_CODE: dict[str, str] = {
     "SAN DIEGO": "SD", "PADRES": "SD",
     "SAN FRANCISCO": "SF", "GIANTS": "SF",
     "SEATTLE": "SEA", "MARINERS": "SEA", "M'S": "SEA",
-    "ST LOUIS": "STL", "CARDINALS": "STL", "CARDS": "STL",
+    "ST LOUIS": "STL", "ST LOUIS CARDINALS": "STL", "CARDINALS": "STL", "CARDS": "STL",
     "TAMPA BAY": "TB", "RAYS": "TB",
     "TEXAS": "TEX", "RANGERS": "TEX",
     "TORONTO": "TOR", "BLUE JAYS": "TOR", "JAYS": "TOR",
@@ -149,9 +149,9 @@ TEAM_CODE: dict[str, str] = {
     "WINNIPEG JETS": "WPG", "JETS": "WPG",
 }
 
-# ---------------------------------------------------------------------------
-# quick reverse lookup (code → one primary alias)  – handy for logging
-# ---------------------------------------------------------------------------
+# -------------------------------------------------------------------
+# reverse helper (code → primary alias) — handy for logging / UI
+# -------------------------------------------------------------------
 CODE_TO_PRIMARY = {
     code: next(alias for alias, c in TEAM_CODE.items() if c == code)
     for code in set(TEAM_CODE.values())
