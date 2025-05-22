@@ -1,16 +1,16 @@
-# fly.toml ──────────────────────────────────────────────
+# fly.toml
 app            = "sharp-young-resonance-77"
 primary_region = "sea"
 
 [build]
   dockerfile = "Dockerfile"
 
-# ───────  VOLUME MOUNT  ───────
-[[mounts]]                     # ← double square-brackets **required**
-  source      = "wa_data"
-  destination = "/data"
-  processes   = ["worker", "settler"]  # attach to both groups
-  # (omit this line if you really want it mounted to *all* groups)
+# ─── this is the bit that actually wires the volume in ───
+[mounts]
+  source      = "wa_data"     # the volume name you created
+  destination = "/data"       # path inside the container
+  processes   = ["worker", "settler"]   # attach to BOTH groups
+# ─────────────────────────────────────────────────────────
 
 [env]
   PYTHONUNBUFFERED = "1"
