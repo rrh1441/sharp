@@ -1,29 +1,24 @@
+# fly.toml ─── one-machine/one-volume layout
 app            = "sharp-young-resonance-77"
 primary_region = "sea"
 
 [build]
-  dockerfile = "Dockerfile"
+dockerfile = "Dockerfile"
 
-#────────────────────  volumes  ────────────────────
-[[mounts]]                     # volume for the worker process-group
-  source      = "wa_data"      # <- exactly as in `fly volumes list`
-  destination = "/data"
-  processes   = ["worker"]
-
-[[mounts]]                     # volume for the settler process-group
-  source      = "wa_data_settler"
-  destination = "/data"
-  processes   = ["settler"]
-#────────────────────────────────────────────────────
+# ----- persistent storage ----------------------------------------------
+[[mounts]]
+source      = "wa_data"     # the single volume you already created
+destination = "/data"       # visible inside the container as /data
+# ------------------------------------------------------------------------
 
 [env]
-  PYTHONUNBUFFERED = "1"
+PYTHONUNBUFFERED = "1"
 
+# only ONE process-group.  It runs start.sh, which launches both tasks.
 [processes]
-  worker  = "poetry run python -m worker"
-  settler = "poetry run python -m settler --hourly"
+app = "/start.sh"
 
 [[vm]]
-  cpu_kind = "shared"
-  cpus     = 1
-  memory   = "1gb"
+cpu_kind = "shared"
+cpus     = 1
+memory   = "1gb"
