@@ -1,16 +1,5 @@
-"""
-worker.py
-──────────
-Gmail polling agent that:
-
-1.  Watches the NC Sharp “Tips” label
-2.  Extracts bet lines → TipPayload
-3.  Checks odds-slippage, *dry-runs* a bet (for now)
-4.  Logs each action to Google Sheets
-
-Replace `place_bet()` with real integration once parsing is rock-solid.
-"""
-
+# worker.py
+# ──────────────────────────────────────────────────────────────────────
 from __future__ import annotations
 
 import base64
@@ -25,38 +14,44 @@ from pathlib import Path
 from typing import Dict, List
 
 from bs4 import BeautifulSoup
+
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from agent.parse_tip import TipPayload, UnmappedTeamError, parse_tip_email
+from agent.team_map import TEAM_CODE                     # ← new (for alias filter)
 from tools.odds_tool import check_odds
 from tools.ledger_tool import append
 
-# ────────────────────────────────────────────────────────────────────
-# TEMP stub – always succeeds (DRYRUN). Swap out later.
+# ---------------------------------------------------------------------
+# TEMPORARY stub — replace with real sportsbook integration later
 def place_bet(event: str, team: str, stake: float) -> Dict:
+    """
+    Dry-run bet stub. Always “succeeds” and returns a fake ID/odds.
+    Replace this with a real call to WagerAttack once we’re confident.
+    """
     return {
         "id": str(uuid.uuid4()),
         "odds": None,
         "status": "DRYRUN",
     }
-# ────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 
 
-# ── config ──────────────────────────────────────────────────────────
+# ── config ────────────────────────────────────────────────────────────
 UNIT_USD    = float(os.getenv("UNIT_USD", "10"))
-LABEL_ID    = os.environ["GMAIL_LABEL"]
-POLL_SECS   = 30
-MAX_LOG_ERR = 5
+LABEL_ID    = os.environ["GMAIL_LABEL"]               # Gmail label ID to watch
+POLL_SECS   = 30                                      # inbox poll interval
+MAX_LOG_ERR = 5                                       # cap on error rows / run
 DEBUG       = False
 
 creds = Credentials.from_authorized_user_info(json.loads(os.environ["GMAIL_TOKEN_JSON"]))
 gmail = build("gmail", "v1", credentials=creds, cache_discovery=False)
 
-HIST_F = Path(".gmail_hist")
+HIST_F = Path(".gmail_hist")                          # stores last historyId
 
 
-# ── gmail helpers ───────────────────────────────────────────────────
+# ── gmail helpers ────────────────────────────────────────────────────
 def _save_hist(hid: str) -> None:
     HIST_F.write_text(hid, encoding="utf-8")
 
@@ -68,8 +63,13 @@ def _load_hist() -> str | None:
 def _baseline() -> List[Dict]:
     hid = gmail.users().getProfile(userId="me").execute()["historyId"]
     _save_hist(hid)
-    resp = gmail.users().messages().list(userId="me", labelIds=[LABEL_ID], maxResults=50).execute()
-    return resp.get("messages", [])
+    resp = gmail.users().messages().list(
+        userId="me", labelIds=[LABEL_ID], maxResults=50
+    ).execute()
+    msgs = resp.get("messages", [])
+    if DEBUG:
+        print("[DEBUG] baseline", len(msgs))
+    return msgs
 
 
 def _incremental(start: str) -> List[Dict]:
@@ -81,72 +81,90 @@ def _incremental(start: str) -> List[Dict]:
     ).execute()
     if "historyId" in resp:
         _save_hist(resp["historyId"])
-    return [m["message"] for h in resp.get("history", []) for m in h.get("messagesAdded", [])]
+    msgs = [m["message"] for h in resp.get("history", []) for m in h.get("messagesAdded", [])]
+    if DEBUG:
+        print("[DEBUG] incremental", len(msgs))
+    return msgs
 
 
 def _msg_body(mid: str) -> str:
+    """
+    Return **plain-text** body for a Gmail message ID.
+    If only HTML exists (FanBasis template), strip tags with BeautifulSoup.
+    """
     raw = gmail.users().messages().get(userId="me", id=mid, format="raw").execute()["raw"]
     eml = message_from_bytes(base64.urlsafe_b64decode(raw))
 
-    # try plain text first
+    # 1️⃣ text/plain part first
     if eml.is_multipart():
         for part in eml.walk():
             if part.get_content_type() == "text/plain":
                 return part.get_payload(decode=True).decode(errors="ignore")
 
-    # else strip HTML
-    html = None
+    # 2️⃣ fall back to HTML → text
+    html = eml.get_payload(decode=True).decode(errors="ignore") if not eml.is_multipart() else None
     if eml.is_multipart():
         for part in eml.walk():
             if part.get_content_type() == "text/html":
                 html = part.get_payload(decode=True).decode(errors="ignore")
                 break
-    else:
-        html = eml.get_payload(decode=True).decode(errors="ignore")
 
-    soup = BeautifulSoup(html or "", "html.parser")
-    return soup.get_text("\n")
+    if html:
+        soup = BeautifulSoup(html, "html.parser")
+        return soup.get_text("\n")           # keep line breaks for regex
+
+    # 3️⃣ last-ditch: raw payload
+    return eml.get_payload(decode=True).decode(errors="ignore")
 
 
 # ── tip-line extraction  ────────────────────────────────────────────
-_RE_HTML   = re.compile(r"^\s*<", re.A)
-_RE_UNITS  = re.compile(r"\(?\s*[\d.]+\s*(?:U|UNITS?)\s*\)?", re.I)
-_RE_HEADER = re.compile(r"ALL\s+\d+\s+UNIT\s+PLAYS?", re.I)
+_RE_HTML  = re.compile(r"^\s*<", re.A)
+_RE_UNITS = re.compile(r"\(?\s*(\d(?:\.\d)?)\s*(?:U|UNITS?)\s*\)?", re.I)
 
-def _collapse_units(raw: str) -> List[str]:
+# compile one big pattern of all team aliases for fast filtering
+_ALIAS_PAT = re.compile(
+    r"\b(" + "|".join(re.escape(a) for a in TEAM_CODE.keys()) + r")\b",
+    re.I,
+)
+
+
+def _collapse_units(text: str) -> List[str]:
+    """
+    Collapse “bet” and “units” into single lines.
+
+    • Ignores header/footer lines that don’t mention a team alias
+    • Supports units inline (“Padres ML 1u”) OR on next line
+    """
     clean = [
         ln.strip()
-        for ln in raw.splitlines()
-        if ln.strip() and not _RE_HTML.match(ln) and not _RE_HEADER.match(ln)
+        for ln in text.splitlines()
+        if ln.strip()                           # non-empty
+        and not _RE_HTML.match(ln)              # not raw HTML
+        and _ALIAS_PAT.search(ln)               # contains a team keyword
     ]
 
     bets, i = [], 0
     while i < len(clean):
         ln = clean[i]
-
-        # explicit units on same line
-        if _RE_UNITS.search(ln):
+        if _RE_UNITS.search(ln):                       # units already present
             bets.append(ln)
             i += 1
-            continue
-
-        # units on next line
-        if i + 1 < len(clean) and _RE_UNITS.fullmatch(clean[i + 1]):
-            bets.append(f"{ln} ({clean[i + 1]})")
+        elif i + 1 < len(clean) and _RE_UNITS.fullmatch(clean[i + 1]):
+            bets.append(f"{ln} ({clean[i + 1]})")      # merge with next-line units
             i += 2
-            continue
-
-        # no units anywhere → assume 1
-        bets.append(f"{ln} (1 Unit)")
-        i += 1
-
+        else:
+            i += 1
     return bets
 
 
-# ── logging helper ─────────────────────────────────────────────────
+# ── logging helper (quota safe) ─────────────────────────────────────
 _error_counter = itertools.count()
 
+
 def _log_failure(body: str, status: str, mid: str) -> None:
+    """
+    Record at most MAX_LOG_ERR rows per run to avoid Sheets API quota hits.
+    """
     idx = next(_error_counter)
     if idx < MAX_LOG_ERR:
         append(
@@ -184,8 +202,9 @@ def _process(mid: str, tip_line: str) -> None:
         return
 
     stake = tip.units * UNIT_USD
-    event = f"{tip.team} @ {tip.opponent or 'TBD'}"
+    event = f"{tip.team} @ {tip.opponent or 'TBD'}"  # opponent can be None
 
+    # ── odds slippage guard (if tip included “min_odds”) ──
     if tip.min_odds:
         ok = check_odds(event, tip.team, tip.min_odds)
         if not ok["available"]:
@@ -201,6 +220,7 @@ def _process(mid: str, tip_line: str) -> None:
             )
             return
 
+    # ── Dry-run bet placement ──
     bet = place_bet(event, tip.team, stake)
     append(
         {
