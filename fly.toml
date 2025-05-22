@@ -1,14 +1,16 @@
-# fly.toml  – works
+# fly.toml ──────────────────────────────────────────────
 app            = "sharp-young-resonance-77"
 primary_region = "sea"
 
 [build]
   dockerfile = "Dockerfile"
 
-[[mounts]]
+# ───────  VOLUME MOUNT  ───────
+[[mounts]]                     # ← double square-brackets **required**
   source      = "wa_data"
   destination = "/data"
-  processes   = ["worker", "settler"]   # ← explicit
+  processes   = ["worker", "settler"]  # attach to both groups
+  # (omit this line if you really want it mounted to *all* groups)
 
 [env]
   PYTHONUNBUFFERED = "1"
