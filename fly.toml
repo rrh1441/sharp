@@ -1,16 +1,20 @@
-# fly.toml
 app            = "sharp-young-resonance-77"
 primary_region = "sea"
 
 [build]
   dockerfile = "Dockerfile"
 
-# ─── this is the bit that actually wires the volume in ───
-[mounts]
-  source      = "wa_data"     # the volume name you created
-  destination = "/data"       # path inside the container
-  processes   = ["worker", "settler"]   # attach to BOTH groups
-# ─────────────────────────────────────────────────────────
+#────────────────────  volumes  ────────────────────
+[[mounts]]                     # volume for the worker process-group
+  source      = "wa_data"      # <- exactly as in `fly volumes list`
+  destination = "/data"
+  processes   = ["worker"]
+
+[[mounts]]                     # volume for the settler process-group
+  source      = "wa_data_settler"
+  destination = "/data"
+  processes   = ["settler"]
+#────────────────────────────────────────────────────
 
 [env]
   PYTHONUNBUFFERED = "1"
