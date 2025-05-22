@@ -1,24 +1,32 @@
-# fly.toml ─── one-machine/one-volume layout
 app            = "sharp-young-resonance-77"
 primary_region = "sea"
 
 [build]
-dockerfile = "Dockerfile"
+  dockerfile = "Dockerfile"
 
-# ----- persistent storage ----------------------------------------------
-[[mounts]]
-source      = "wa_data"     # the single volume you already created
-destination = "/data"       # visible inside the container as /data
-# ------------------------------------------------------------------------
+# ------------------------------------------------------------------
+# One volume, mounted ONLY on the always-on worker Machine
+# ------------------------------------------------------------------
+[mounts]
+  source      = "wa_data"   # you already created this volume
+  destination = "/data"     # worker reads /data/wa_token.json + .gmail_hist
+  processes   = ["worker"]  # attach to worker only
 
 [env]
-PYTHONUNBUFFERED = "1"
+  PYTHONUNBUFFERED = "1"
 
-# only ONE process-group.  It runs start.sh, which launches both tasks.
+# ------------------------------------------------------------------
+# Two distinct process groups → Fly will spin up two Machines
+# ------------------------------------------------------------------
 [processes]
-app = "/start.sh"
+  # long-lived Gmail poller / WA bet placer
+  worker  = "poetry run python -m worker"
+
+  # one-shot job that sleeps internally and exits;
+  # wakes up again each hour on the scheduler you coded
+  settler = "poetry run python -m settler --hourly"
 
 [[vm]]
-cpu_kind = "shared"
-cpus     = 1
-memory   = "1gb"
+  cpu_kind = "shared"
+  cpus     = 1
+  memory   = "1gb"
