@@ -1,22 +1,32 @@
-# fly.toml  ────────────────────────────────────────────────────────────
+# fly.toml ─────────────────────────────────────────────────────────────
 app            = "sharp-young-resonance-77"
 primary_region = "sea"
 
 [build]
   dockerfile = "Dockerfile"
 
-[mounts]                    # ❶  volume that holds wa_token + gmail_hist
+#######################################################################
+# attach the SAME volume name to two different process-groups
+#######################################################################
+[[mounts]]
   source      = "wa_data"
   destination = "/data"
+  processes   = ["worker"]      # ← exactly the key under [processes]
 
+[[mounts]]
+  source      = "wa_data"
+  destination = "/data"
+  processes   = ["settler"]
+
+#######################################################################
 [env]
   PYTHONUNBUFFERED = "1"
 
-[processes]                 # one long-lived poller + the hourly settler
+[processes]
   worker  = "poetry run python -m worker"
   settler = "poetry run python -m settler --hourly"
 
-[[vm]]                      # tiny shared-CPU instance for both procs
+[[vm]]
   cpu_kind = "shared"
   cpus     = 1
   memory   = "1gb"
