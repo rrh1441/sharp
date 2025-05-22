@@ -1,10 +1,22 @@
-app = "sharp"
+# fly.toml
+app = "sharp-young-resonance-77"
 primary_region = "sea"
+
 [build]
   dockerfile = "Dockerfile"
+
 [env]
   PYTHONUNBUFFERED = "1"
+
 [processes]
-  web     = "poetry run python -m web"
+  # one long-running Gmail poller
   worker  = "poetry run python -m worker"
-  settler = "poetry run python -m settler"
+
+  # one settler that reconciles results once an hour (sleeps in between)
+  settler = "poetry run python -m settler --hourly"
+
+# vm-wide defaults; both groups use the same tiny box
+[[vm]]
+  cpu_kind = "shared"
+  cpus     = 1
+  memory   = "1gb"
