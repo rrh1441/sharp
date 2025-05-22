@@ -1,4 +1,4 @@
-# fly.toml ── minimal & works
+# fly.toml  – works
 app            = "sharp-young-resonance-77"
 primary_region = "sea"
 
@@ -6,8 +6,9 @@ primary_region = "sea"
   dockerfile = "Dockerfile"
 
 [[mounts]]
-  source      = "wa_data"    # ← same volume name
-  destination = "/data"      #   one block, no “processes =”
+  source      = "wa_data"
+  destination = "/data"
+  processes   = ["worker", "settler"]   # ← explicit
 
 [env]
   PYTHONUNBUFFERED = "1"
