@@ -8,3 +8,7 @@
 .env*
 *client_secret.json
 *service_account_key.json
+
+# never commit secrets
+*.json
+.env*
